@@ -43,27 +43,46 @@ if (heroImg) {
   heroIO.observe(heroImg);
 }
 
-// Stat counter animation (guarded against negative interim values)
-const counters = document.querySelectorAll('[data-count]');
-const counterIO = new IntersectionObserver((entries) => {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      const el = entry.target;
-      const target = parseInt(el.dataset.count, 10);
-      const duration = 1400;
-      const start = performance.now();
-      const tick = (now) => {
-        const t = Math.min(1, (now - start) / duration);
-        const eased = 1 - Math.pow(1 - t, 3);
-        el.textContent = Math.max(0, Math.round(target * eased));
-        if (t < 1) requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-      counterIO.unobserve(el);
-    }
+// Stat counter animation v2
+// DOM initial text = final value so AI crawlers capture the real number.
+// data-count="N"              → counts 0→N on viewport entry
+// data-count-seq="a,b,c,…,z" → a is the static DOM default; on enter,
+//                               snaps to b then tweens b→c→…→z
+function _lerp(a, b, t) { return a + (b - a) * t; }
+function _ease3(t) { return 1 - Math.pow(1 - t, 3); }
+function _fmt(v, dec) { return dec ? v.toFixed(dec) : String(Math.round(v)); }
+function _tween(el, from, to, ms, dec) {
+  return new Promise(res => {
+    const t0 = performance.now();
+    const tick = now => {
+      const p = Math.min(1, (now - t0) / ms);
+      el.textContent = _fmt(_lerp(from, to, _ease3(p)), dec);
+      if (p < 1) requestAnimationFrame(tick); else { el.textContent = _fmt(to, dec); res(); }
+    };
+    requestAnimationFrame(tick);
   });
+}
+function _wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+async function _runCounter(el) {
+  if (el.hasAttribute('data-count-seq')) {
+    const steps = el.dataset.countSeq.split(',').map(Number);
+    const dec = steps.some(v => !Number.isInteger(v)) ? 1 : 0;
+    el.textContent = _fmt(steps[1], dec); // snap to animation start value
+    await _wait(60);
+    for (let i = 1; i < steps.length - 1; i++) {
+      await _tween(el, steps[i], steps[i + 1], 900, dec);
+      if (i < steps.length - 2) await _wait(180);
+    }
+  } else {
+    const target = parseFloat(el.dataset.count);
+    const dec = Number.isInteger(target) ? 0 : 1;
+    await _tween(el, 0, target, 1400, dec);
+  }
+}
+const counterIO = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) { counterIO.unobserve(e.target); _runCounter(e.target); } });
 }, { threshold: 0.4 });
-counters.forEach(el => counterIO.observe(el));
+document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counterIO.observe(el));
 
 // ===== AI QUOTE TOOL =====
 (function(){
