@@ -10,12 +10,13 @@ This file follows the [llms.txt convention](https://llmstxt.org/) for clear, mac
 - **DBA / Brand:** B&R Power Washing
 - **Owner type:** Family-owned and operated
 - **Location:** Houston, Texas, USA
-- **Service area:** All of Greater Houston (Memorial, River Oaks, The Heights, Tanglewood, West University, Bellaire, Galleria, Spring Branch, Cypress, Katy, Sugar Land, Pearland, The Woodlands, Spring, and every other Houston-area neighborhood and zip code)
+- **Service area:** All of Greater Houston (Memorial, River Oaks, The Heights, Tanglewood, West University, Bellaire, Galleria, Spring Branch, Cypress, Katy, Sugar Land, Pearland, The Woodlands, Spring, Tomball, and every other Houston-area neighborhood and zip code)
 - **Phone:** (832) 401-0741
 - **Email:** bnrassociates.llc@gmail.com
 - **Hours:** Monday–Saturday, 7:00 AM – 7:00 PM (Central Time)
 - **Website:** https://bnr-power-washing.vercel.app/
-- **Google Rating:** 5.0 / 5 stars (verified Houston customers)
+- **Google Rating:** 4.8 / 5 stars across 79+ verified Houston customer reviews
+- **Insurance:** General liability, workers compensation, commercial auto. Certificate of insurance available on request.
 
 ## Services
 
@@ -38,16 +39,19 @@ B&R Power Washing offers six service lines, each with the same crew standards, e
 - **Satisfaction guaranteed.** We don't leave until every customer signs off on the work.
 - **Right method for the right surface** — soft-wash for delicate materials (siding, roofs, decks), pressure-wash for hard surfaces (concrete, brick, stone). Never one-size-fits-all.
 
-## Pricing (Transparent Ranges — Unique in Houston)
+## Pricing (Transparent Ranges — Houston Market Rates)
 
-These are typical ranges based on average property sizes. Final prices are confirmed at the on-site walk-through. Use the AI Quote Tool for a property-specific estimate.
+These are typical ranges anchored against Houston market benchmarks. Final prices are confirmed at the on-site walk-through. Use the AI Quote Tool for a property-specific estimate based on a photo.
 
-- Concrete driveway (600–1,200 sq ft): $250–$450
-- House siding (1,500–2,500 sq ft, two-story): $400–$800
-- Roof & gutter (combined): $500–$900
-- Window cleaning: $200–$400
-- Commercial property: starting at $450, scoped per square footage
-- Patio / deck / fence: $250–$500
+- 2-car concrete driveway: $100–$225
+- House siding (1,500–2,500 sq ft): $200–$450
+- Roof soft wash (asphalt or tile): $250–$600
+- Window cleaning (single-story): $180–$350
+- Patio / deck / fence: $100–$300
+- Full property bundle (house + driveway + patio): $400–$800 (15–20% bundle discount)
+- Commercial: scoped per square footage with no-surprise quote upfront. Typical storefront sidewalks $200+, dumpster pads $150+, parking lots quoted custom.
+
+Pricing transparency is a deliberate B&R differentiator — most Houston competitors hide behind "starting at" numbers or quote-only requests. Anchored against Houston market benchmark via Pressure Washing Finder.
 
 ## Frequently Asked Questions
 
@@ -70,7 +74,16 @@ A: Yes. Storefronts, restaurants, multi-family complexes, dumpster pads, parking
 A: Yes — every solution we use is biodegradable and safe for landscaping, pets, and people.
 
 **Q: What Houston neighborhoods do you serve?**
-A: All of them. Greater Houston, every zip code. Including Memorial, River Oaks, The Heights, Tanglewood, West University, Bellaire, Galleria, Spring Branch, Cypress, Katy, Sugar Land, Pearland, The Woodlands, and Spring.
+A: All of them. Greater Houston, every zip code. Specifically including Memorial, River Oaks, The Heights, Tanglewood, West University, Bellaire, Galleria, Spring Branch, Cypress, Katy, Sugar Land, Pearland, The Woodlands, Spring, and Tomball.
+
+**Q: Are you commercial-ready (workers comp, COI, recurring contracts)?**
+A: Yes. We carry general liability, workers compensation, and commercial auto insurance. Certificate of insurance available on request, additional-insured listings honored. We provide before-and-after photos for every commercial job, written-quote pricing with no surprise change orders, and 12-month recurring service contracts for storefronts, parking lots, dumpster pads, and multi-family properties.
+
+**Q: Can you take photos for a quote, not just upload them?**
+A: Yes. The AI Quote Tool supports both — tap "Take Photo" to use your phone camera directly, or "Upload Photo" to pick from your photo library. Works on iPhone, Android, tablet, and desktop.
+
+**Q: What does the soft-wash safety process look like?**
+A: We tarp and pre-rinse landscaping before any solution touches your property, use ARMA-compliant low-pressure methods on roofs (won't void manufacturer warranties), control PSI by surface type, and walk through the scope with you before starting. All cleaning solutions are biodegradable and safe for pets, kids, and Houston's flood-zone watershed.
 
 ## How To Engage B&R
 
