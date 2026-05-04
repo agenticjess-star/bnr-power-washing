@@ -1,0 +1,13 @@
+{
+  "name": "bnr-power-washing",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "B&R Power Washing — Houston's Premium Exterior Cleaning. Static site with Vercel serverless API for AI-powered photo quotes.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vercel dev"
+  }
+}
