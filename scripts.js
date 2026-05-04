@@ -88,7 +88,8 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
 (function(){
   const tool = document.getElementById('aqTool');
   if (!tool) return;
-  const photoInput = document.getElementById('aqPhoto');
+  const photoCamera = document.getElementById('aqPhotoCamera');
+  const photoUpload = document.getElementById('aqPhotoUpload');
   const dropzone = document.getElementById('aqDropzone');
   const previewImg = document.getElementById('aqPreviewImg');
   const beforeImg = document.getElementById('aqBeforeImg');
@@ -130,16 +131,36 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
     reader.readAsDataURL(file);
   }
 
-  photoInput.addEventListener('change', e => handleFile(e.target.files[0]));
-  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
-  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
-  dropzone.addEventListener('drop', e => {
-    e.preventDefault();
-    dropzone.classList.remove('dragover');
-    handleFile(e.dataTransfer.files[0]);
-  });
+  if (photoCamera) photoCamera.addEventListener('change', e => handleFile(e.target.files[0]));
+  if (photoUpload) photoUpload.addEventListener('change', e => handleFile(e.target.files[0]));
+  if (dropzone) {
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      handleFile(e.dataTransfer.files[0]);
+    });
+    // Paste-to-upload (desktop UX bonus)
+    document.addEventListener('paste', e => {
+      const tool = document.getElementById('aqTool');
+      if (!tool || tool.dataset.current !== '1') return;
+      const items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          handleFile(items[i].getAsFile());
+          break;
+        }
+      }
+    });
+  }
 
-  changeBtn.addEventListener('click', () => { photoInput.value = ''; goToStep(1); });
+  if (changeBtn) changeBtn.addEventListener('click', () => {
+    if (photoCamera) photoCamera.value = '';
+    if (photoUpload) photoUpload.value = '';
+    goToStep(1);
+  });
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -249,8 +270,9 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
     timerInterval = setInterval(tick, 1000);
   }
 
-  startOverBtn.addEventListener('click', () => {
-    photoInput.value = '';
+  if (startOverBtn) startOverBtn.addEventListener('click', () => {
+    if (photoCamera) photoCamera.value = '';
+    if (photoUpload) photoUpload.value = '';
     currentPhotoData = null;
     if (timerInterval) clearInterval(timerInterval);
     goToStep(1);
