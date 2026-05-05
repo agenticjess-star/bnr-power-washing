@@ -44,10 +44,6 @@ if (heroImg) {
 }
 
 // Stat counter animation v2
-// DOM initial text = final value so AI crawlers capture the real number.
-// data-count="N"              → counts 0→N on viewport entry
-// data-count-seq="a,b,c,…,z" → a is the static DOM default; on enter,
-//                               snaps to b then tweens b→c→…→z
 function _lerp(a, b, t) { return a + (b - a) * t; }
 function _ease3(t) { return 1 - Math.pow(1 - t, 3); }
 function _fmt(v, dec) { return dec ? v.toFixed(dec) : String(Math.round(v)); }
@@ -67,7 +63,7 @@ async function _runCounter(el) {
   if (el.hasAttribute('data-count-seq')) {
     const steps = el.dataset.countSeq.split(',').map(Number);
     const dec = steps.some(v => !Number.isInteger(v)) ? 1 : 0;
-    el.textContent = _fmt(steps[1], dec); // snap to animation start value
+    el.textContent = _fmt(steps[1], dec);
     await _wait(60);
     for (let i = 1; i < steps.length - 1; i++) {
       await _tween(el, steps[i], steps[i + 1], 900, dec);
@@ -141,7 +137,6 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
       dropzone.classList.remove('dragover');
       handleFile(e.dataTransfer.files[0]);
     });
-    // Paste-to-upload (desktop UX bonus)
     document.addEventListener('paste', e => {
       const tool = document.getElementById('aqTool');
       if (!tool || tool.dataset.current !== '1') return;
@@ -171,12 +166,20 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
       return;
     }
     email.style.borderColor = '';
+    const isCommercial = (document.getElementById('instant-quote') || {}).getAttribute && document.getElementById('instant-quote').getAttribute('data-quote-type') === 'commercial';
     const data = {
       email: email.value,
       phone: document.getElementById('aqPhone').value,
-      address: document.getElementById('aqAddress').value,
-      timestamp: new Date().toISOString()
+      address: (document.getElementById('aqAddress') || {}).value || (document.getElementById('aqAddressC') || {}).value || '',
+      timestamp: new Date().toISOString(),
+      type: isCommercial ? 'commercial' : 'residential'
     };
+    if (isCommercial) {
+      data.company = (document.getElementById('aqCompany') || {}).value || '';
+      data.propertyType = (document.getElementById('aqPropertyType') || {}).value || '';
+      data.sqft = (document.getElementById('aqSqft') || {}).value || '';
+      data.frequency = (document.getElementById('aqFrequency') || {}).value || '';
+    }
     try { localStorage.setItem('bnr_lead_' + Date.now(), JSON.stringify(data)); } catch(err) {}
     runAnalysis(data);
   });
@@ -187,7 +190,7 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
       { label: 'Analyzing photo composition', delay: 600 },
       { label: 'Estimating square footage', delay: 700 },
       { label: 'Recommending method', delay: 600 },
-      { label: 'Calculating your quote', delay: 500 }
+      { label: data.type === 'commercial' ? 'Calculating contract rate' : 'Calculating your quote', delay: 500 }
     ];
     const items = statusList.querySelectorAll('li');
     items.forEach((li, i) => {
@@ -195,7 +198,6 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
       if (i === 0) li.classList.add('active');
     });
 
-    // Kick off the real API call in parallel with the loading animation
     const apiPromise = fetch('/api/quote', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -203,7 +205,12 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
         photo: currentPhotoData,
         email: data.email,
         phone: data.phone || '',
-        address: data.address || ''
+        address: data.address || '',
+        type: data.type || 'residential',
+        company: data.company,
+        propertyType: data.propertyType,
+        sqft: data.sqft,
+        frequency: data.frequency
       })
     })
     .then(r => r.ok ? r.json() : Promise.reject(r))
@@ -241,16 +248,25 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
       const surfaceLabel = q.surfaceLabel || q.surfaceType || 'exterior';
       detail.textContent = 'Estimated ' + q.sqft + ' sq ft \u00b7 ' + (q.stainLevel || 'moderate') + ' stain level \u00b7 ' + method + ' \u00b7 ' + surfaceLabel;
     } else {
-      // Offline fallback estimate
       const hash = (data.email || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-      const base = 280 + (hash % 250);
-      const high = base + 80 + (hash % 120);
+      let base, high;
+      if (data.type === 'commercial') {
+        const sqft = parseInt(String(data.sqft || '').replace(/[^0-9]/g, ''), 10) || 3000;
+        const perVisit = Math.max(450, Math.round(sqft * 0.16));
+        const freqMul = { weekly: 0.6, monthly: 0.75, quarterly: 0.85, biannual: 0.9, onetime: 1 }[data.frequency] || 0.75;
+        base = Math.round(perVisit * freqMul / 5) * 5;
+        high = Math.round(perVisit * freqMul * 1.25 / 5) * 5;
+        detail.textContent = `Estimated ${sqft.toLocaleString()} sq ft \u00b7 ${data.frequency || 'monthly'} contract \u00b7 per-visit rate (offline estimate)`;
+      } else {
+        base = 280 + (hash % 250);
+        high = base + 80 + (hash % 120);
+        const sqft = 600 + (hash % 800);
+        const stainLevels = ['light', 'moderate', 'heavy'];
+        const stain = stainLevels[hash % 3];
+        detail.textContent = 'Estimated ' + sqft + ' sq ft \u00b7 ' + stain + ' stain level \u00b7 soft wash + pressure (offline estimate)';
+      }
       priceLow.textContent = '$' + base;
       priceHigh.textContent = '$' + high;
-      const sqft = 600 + (hash % 800);
-      const stainLevels = ['light', 'moderate', 'heavy'];
-      const stain = stainLevels[hash % 3];
-      detail.textContent = 'Estimated ' + sqft + ' sq ft \u00b7 ' + stain + ' stain level \u00b7 soft wash + pressure (offline estimate)';
     }
     goToStep(4);
     startTimer();
@@ -278,7 +294,7 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
     goToStep(1);
   });
 
-  emailQuoteBtn.addEventListener('click', () => {
+  if (emailQuoteBtn) emailQuoteBtn.addEventListener('click', () => {
     const email = document.getElementById('aqEmail').value;
     emailQuoteBtn.textContent = 'Sent to ' + email;
     emailQuoteBtn.style.background = 'var(--gold-soft)';
@@ -299,32 +315,51 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
 
   const STORAGE_KEY = 'bnr_quote_seen';
   let modalActive = false;
-  let toolHomeParent = aqTool.parentNode;
+  let savedScrollY = 0;
+  const toolHomeParent = aqTool.parentNode;
 
   function setQuoteType(type) {
-    if (type === 'commercial') {
+    const isCommercial = type === 'commercial';
+    if (isCommercial) {
       aqSection.setAttribute('data-quote-type', 'commercial');
       modal.setAttribute('data-quote-type', 'commercial');
-      // toggle data-residential vs data-commercial spans
-      document.querySelectorAll('#aqSample [data-residential]').forEach(el => el.hidden = true);
-      document.querySelectorAll('#aqSample [data-commercial]').forEach(el => el.hidden = false);
     } else {
       aqSection.removeAttribute('data-quote-type');
       modal.removeAttribute('data-quote-type');
-      document.querySelectorAll('#aqSample [data-residential]').forEach(el => el.hidden = false);
-      document.querySelectorAll('#aqSample [data-commercial]').forEach(el => el.hidden = true);
+    }
+    document.querySelectorAll('#aqSample [data-residential]').forEach(el => el.hidden = isCommercial);
+    document.querySelectorAll('#aqSample [data-commercial]').forEach(el => el.hidden = !isCommercial);
+    const aqHead = document.querySelector('#aqTool .aq-head, .aq-head');
+    if (aqHead) {
+      const h2 = aqHead.querySelector('h2');
+      const lede = aqHead.querySelector('.lede');
+      const eyebrow = aqHead.querySelector('.eyebrow');
+      if (isCommercial) {
+        if (h2) h2.innerHTML = 'Commercial-grade <em class="italic-disp">contract quote.</em>';
+        if (lede) lede.textContent = 'Snap a photo of your storefront, parking lot, or property exterior. Tell us scope + frequency. We come back with a real contract rate (one-time or recurring) within 24 hours \u2014 no surprise change orders.';
+        if (eyebrow) eyebrow.innerHTML = '<span class="dot"></span>Powered by AI \u00b7 Commercial contract quote';
+      } else {
+        if (h2) h2.innerHTML = 'Skip the call. <em class="italic-disp">Get an instant quote.</em>';
+        if (lede) lede.textContent = 'Snap a photo of your driveway, home, or storefront. Our AI analyzes it, estimates square footage, picks the right cleaning method, and gives you a real price range \u2014 no more "starting at" pricing.';
+        if (eyebrow) eyebrow.innerHTML = '<span class="dot"></span>Powered by AI \u00b7 60-second quote';
+      }
+    }
+    const submit = document.querySelector('.aq-submit');
+    if (submit) {
+      const label = submit.firstChild;
+      if (label && label.nodeType === 3) label.nodeValue = isCommercial ? 'Get My Contract Rate' : 'Get My Quote';
     }
   }
 
   function openModal(type) {
+    savedScrollY = window.scrollY || window.pageYOffset || 0;
     setQuoteType(type);
-    // Move the existing tool into the modal (preserves form state)
     modalBody.appendChild(aqTool);
     modal.removeAttribute('hidden');
     modal.setAttribute('data-open', 'true');
+    document.body.style.top = `-${savedScrollY}px`;
     document.body.classList.add('modal-open');
     modalActive = true;
-    // Focus first interactive element for a11y
     setTimeout(() => {
       const closeBtn = modal.querySelector('.quote-modal-close');
       if (closeBtn) closeBtn.focus();
@@ -333,11 +368,12 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
 
   function closeModal() {
     if (!modalActive) return;
-    // Move the tool back to its home section
     if (toolHomeParent && aqTool) toolHomeParent.appendChild(aqTool);
     modal.setAttribute('data-open', 'false');
     setTimeout(() => modal.setAttribute('hidden', ''), 240);
     document.body.classList.remove('modal-open');
+    document.body.style.top = '';
+    window.scrollTo(0, savedScrollY);
     modalActive = false;
   }
 
@@ -354,23 +390,18 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
     let seen = false;
     try { seen = sessionStorage.getItem(STORAGE_KEY) === '1'; } catch(_) {}
     if (modalActive) {
-      // already open — just update type if needed
       setQuoteType(type);
       return;
     }
     if (!seen) {
-      // First click: anchor scroll to section
       scrollToSection(type);
       try { sessionStorage.setItem(STORAGE_KEY, '1'); } catch(_) {}
     } else {
-      // Subsequent click: open modal
       openModal(type);
     }
   }
 
   triggers.forEach(t => t.addEventListener('click', e => handleTrigger(e, t)));
-
-  // Close handlers
   modal.querySelectorAll('[data-quote-close]').forEach(el => el.addEventListener('click', closeModal));
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 })();
