@@ -286,3 +286,91 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
     emailQuoteBtn.disabled = true;
   });
 })();
+
+// ===== QUOTE MODAL: scroll first, modal on subsequent clicks =====
+(function(){
+  const triggers = document.querySelectorAll('[data-quote-trigger]');
+  const modal = document.getElementById('quoteModal');
+  const modalBody = document.getElementById('quoteModalBody');
+  if (!triggers.length || !modal || !modalBody) return;
+  const aqSection = document.getElementById('instant-quote');
+  const aqTool = document.getElementById('aqTool');
+  if (!aqSection || !aqTool) return;
+
+  const STORAGE_KEY = 'bnr_quote_seen';
+  let modalActive = false;
+  let toolHomeParent = aqTool.parentNode;
+
+  function setQuoteType(type) {
+    if (type === 'commercial') {
+      aqSection.setAttribute('data-quote-type', 'commercial');
+      modal.setAttribute('data-quote-type', 'commercial');
+      // toggle data-residential vs data-commercial spans
+      document.querySelectorAll('#aqSample [data-residential]').forEach(el => el.hidden = true);
+      document.querySelectorAll('#aqSample [data-commercial]').forEach(el => el.hidden = false);
+    } else {
+      aqSection.removeAttribute('data-quote-type');
+      modal.removeAttribute('data-quote-type');
+      document.querySelectorAll('#aqSample [data-residential]').forEach(el => el.hidden = false);
+      document.querySelectorAll('#aqSample [data-commercial]').forEach(el => el.hidden = true);
+    }
+  }
+
+  function openModal(type) {
+    setQuoteType(type);
+    // Move the existing tool into the modal (preserves form state)
+    modalBody.appendChild(aqTool);
+    modal.removeAttribute('hidden');
+    modal.setAttribute('data-open', 'true');
+    document.body.classList.add('modal-open');
+    modalActive = true;
+    // Focus first interactive element for a11y
+    setTimeout(() => {
+      const closeBtn = modal.querySelector('.quote-modal-close');
+      if (closeBtn) closeBtn.focus();
+    }, 80);
+  }
+
+  function closeModal() {
+    if (!modalActive) return;
+    // Move the tool back to its home section
+    if (toolHomeParent && aqTool) toolHomeParent.appendChild(aqTool);
+    modal.setAttribute('data-open', 'false');
+    setTimeout(() => modal.setAttribute('hidden', ''), 240);
+    document.body.classList.remove('modal-open');
+    modalActive = false;
+  }
+
+  function scrollToSection(type) {
+    setQuoteType(type);
+    const headerOffset = 80;
+    const top = aqSection.getBoundingClientRect().top + window.scrollY - headerOffset;
+    window.scrollTo({ top, behavior: 'smooth' });
+  }
+
+  function handleTrigger(e, trigger) {
+    e.preventDefault();
+    const type = trigger.getAttribute('data-quote-type') || 'residential';
+    let seen = false;
+    try { seen = sessionStorage.getItem(STORAGE_KEY) === '1'; } catch(_) {}
+    if (modalActive) {
+      // already open — just update type if needed
+      setQuoteType(type);
+      return;
+    }
+    if (!seen) {
+      // First click: anchor scroll to section
+      scrollToSection(type);
+      try { sessionStorage.setItem(STORAGE_KEY, '1'); } catch(_) {}
+    } else {
+      // Subsequent click: open modal
+      openModal(type);
+    }
+  }
+
+  triggers.forEach(t => t.addEventListener('click', e => handleTrigger(e, t)));
+
+  // Close handlers
+  modal.querySelectorAll('[data-quote-close]').forEach(el => el.addEventListener('click', closeModal));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+})();
