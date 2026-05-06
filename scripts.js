@@ -247,6 +247,11 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
       const method = methodMap[q.recommendedMethod] || 'soft wash + pressure';
       const surfaceLabel = q.surfaceLabel || q.surfaceType || 'exterior';
       detail.textContent = 'Estimated ' + q.sqft + ' sq ft \u00b7 ' + (q.stainLevel || 'moderate') + ' stain level \u00b7 ' + method + ' \u00b7 ' + surfaceLabel;
+      // Real AI-generated after-image (falls back to static SVG if generation failed)
+      if (apiData.afterImage) {
+        const afterImg = document.getElementById('aqAfterImg');
+        if (afterImg) afterImg.src = apiData.afterImage;
+      }
     } else {
       const hash = (data.email || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
       let base, high;

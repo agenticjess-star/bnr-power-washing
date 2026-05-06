@@ -1,11 +1,16 @@
 // Vercel Serverless Function: AI-powered instant quote
 // POST /api/quote with { photo: dataUri, email, phone, address, service }
-// Returns { ok, quote: {priceLow, priceHigh, sqft, surfaceType, surfaceLabel, stainLevel, recommendedMethod, summary} }
+// Returns { ok, quote: {...}, afterImage: dataUri|null, lead: {...} }
+//
+// Two Gemini calls:
+//  1. Vision analysis (text JSON): surface type, sqft, stain, method, summary
+//  2. Image generation: "after" image showing the same property cleaned
 
 export const config = { maxDuration: 30 };
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash';
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image-preview';
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const PRICING = {
   driveway:    { perSqft: 0.42, min: 180, label: 'Concrete driveway · pressure wash' },
@@ -31,6 +36,8 @@ const ANALYSIS_PROMPT = `You are estimating a power-washing job from a customer'
   "confidence": one of: "low"|"medium"|"high"
 }
 Be conservative on sqft. Output ONLY the JSON.`;
+
+const AFTER_IMAGE_PROMPT = `Show this exact property after a professional power washing service: same composition, same camera angle, same vantage point, same architectural details, same surroundings. The only change: every cleanable surface is now sparkling clean and pristine — spotless concrete, vibrant clean siding, no algae, no mildew, no rust, no oil stains, fresh and bright. Photorealistic, natural daylight, professional real-estate photography quality. No text, no logos, no watermarks added. Preserve the original property exactly; only remove the dirt and stains.`;
 
 function calcQuote(analysis) {
   const surface = analysis.surfaceType in PRICING ? analysis.surfaceType : 'unknown';
@@ -60,6 +67,51 @@ function extractJson(txt) {
   const e = cleaned.lastIndexOf('}');
   if (s === -1 || e === -1) return null;
   try { return JSON.parse(cleaned.slice(s, e + 1)); } catch (err) { return null; }
+}
+
+async function generateAfterImage(apiKey, mimeType, base64) {
+  // Best-effort: returns data URI or null. Tries primary model, falls back if 404.
+  const candidateModels = [GEMINI_IMAGE_MODEL, 'gemini-2.5-flash-image', 'gemini-2.0-flash-exp-image-generation'];
+  for (const model of candidateModels) {
+    try {
+      const url = `${GEMINI_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const body = {
+        contents: [{
+          role: 'user',
+          parts: [
+            { text: AFTER_IMAGE_PROMPT },
+            { inlineData: { mimeType, data: base64 } }
+          ]
+        }],
+        generationConfig: { responseModalities: ['IMAGE'] }
+      };
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (r.ok) {
+        const data = await r.json();
+        const part = data?.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data);
+        if (part) {
+          const outMime = part.inlineData.mimeType || 'image/png';
+          return `data:${outMime};base64,${part.inlineData.data}`;
+        }
+        // 200 but no inlineData — try next model
+        console.warn('[bnr-after-image]', model, 'ok but no image part');
+        continue;
+      }
+      // Non-2xx — try next model on 404, otherwise log and bail
+      const errTxt = await r.text();
+      console.warn('[bnr-after-image]', model, r.status, errTxt.slice(0, 240));
+      if (r.status === 404 || r.status === 400) continue;
+      return null;
+    } catch (e) {
+      console.warn('[bnr-after-image-fail]', model, e?.message);
+      continue;
+    }
+  }
+  return null;
 }
 
 export default async function handler(req, res) {
@@ -99,6 +151,7 @@ export default async function handler(req, res) {
   };
   try { console.log('[bnr-lead]', JSON.stringify(lead)); } catch (e) {}
 
+  // Step 1: Analyze the photo (text JSON response)
   let analysis;
   try {
     const geminiBody = {
@@ -111,7 +164,7 @@ export default async function handler(req, res) {
       }],
       generationConfig: { temperature: 0.2, maxOutputTokens: 400, responseMimeType: 'application/json' }
     };
-    const r = await fetch(`${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
+    const r = await fetch(`${GEMINI_BASE}/${GEMINI_TEXT_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(geminiBody)
@@ -130,9 +183,17 @@ export default async function handler(req, res) {
   }
 
   const quote = calcQuote(analysis);
+
+  // Step 2: Generate an "after" image (best-effort, parallel-safe).
+  // We await so the response carries the image; the function timeout (30s)
+  // is enough for both calls. If image gen fails, afterImage is null and the
+  // frontend falls back to its default SVG placeholder gracefully.
+  const afterImage = await generateAfterImage(apiKey, mimeType, base64);
+
   return res.status(200).json({
     ok: true,
     quote,
+    afterImage,
     lead: { received: true, email },
     requestId: req.headers['x-vercel-id'] || null
   });
