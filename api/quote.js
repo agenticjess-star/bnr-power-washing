@@ -15,7 +15,13 @@ import { put } from '@vercel/blob';
 export const config = { maxDuration: 30 };
 
 const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash';
-const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image-preview';
+// Image model fallback chain — newest first (likely separate quota), oldest stable last.
+// Verified via /api/debug-gemini against the live API key 2026-05-05:
+//   gemini-3.1-flash-image-preview ✓ available (Nano Banana 2)
+//   gemini-3-pro-image-preview      ✓ available
+//   nano-banana-pro-preview         ✓ available (alias)
+//   gemini-2.5-flash-image          ✓ available (rate-limited on free tier)
+const GEMINI_IMAGE_MODELS = (process.env.GEMINI_IMAGE_MODELS || 'gemini-3.1-flash-image-preview,gemini-3-pro-image-preview,nano-banana-pro-preview,gemini-2.5-flash-image').split(',').map(s => s.trim());
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const PRICING = {
@@ -108,9 +114,8 @@ async function uploadToBlob(prefix, base64, mimeType) {
 }
 
 async function generateAfterImage(apiKey, mimeType, base64) {
-  // Returns { mimeType, base64 } or null.
-  const candidateModels = [GEMINI_IMAGE_MODEL, 'gemini-2.5-flash-image', 'gemini-2.0-flash-exp-image-generation'];
-  for (const model of candidateModels) {
+  // Returns { mimeType, base64, modelUsed } or null.
+  for (const model of GEMINI_IMAGE_MODELS) {
     try {
       const url = `${GEMINI_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
       const body = {
@@ -132,9 +137,11 @@ async function generateAfterImage(apiKey, mimeType, base64) {
         const data = await r.json();
         const part = data?.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data);
         if (part) {
+          console.log('[bnr-after-image] success', model);
           return {
             mimeType: part.inlineData.mimeType || 'image/png',
-            base64: part.inlineData.data
+            base64: part.inlineData.data,
+            modelUsed: model
           };
         }
         console.warn('[bnr-after-image]', model, 'ok but no image part');
@@ -142,7 +149,8 @@ async function generateAfterImage(apiKey, mimeType, base64) {
       }
       const errTxt = await r.text();
       console.warn('[bnr-after-image]', model, r.status, errTxt.slice(0, 240));
-      if (r.status === 404 || r.status === 400) continue;
+      // Continue on 404 (model not found), 400 (bad request), 429 (rate limit — try next model)
+      if (r.status === 404 || r.status === 400 || r.status === 429) continue;
       return null;
     } catch (e) {
       console.warn('[bnr-after-image-fail]', model, e?.message);
