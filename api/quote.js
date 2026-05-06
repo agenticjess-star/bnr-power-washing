@@ -113,9 +113,10 @@ async function uploadToBlob(prefix, base64, mimeType) {
   }
 }
 
-async function generateAfterImage(apiKey, mimeType, base64) {
-  // Returns { mimeType, base64, modelUsed } or null.
+async function generateAfterImage(apiKey, mimeType, base64, diag) {
+  // Returns { mimeType, base64, modelUsed } or null. Pushes per-model attempt info to diag if provided.
   for (const model of GEMINI_IMAGE_MODELS) {
+    const attempt = { model, status: null, ok: false, error: null, partKeys: null };
     try {
       const url = `${GEMINI_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
       const body = {
@@ -133,27 +134,37 @@ async function generateAfterImage(apiKey, mimeType, base64) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
+      attempt.status = r.status;
+      attempt.ok = r.ok;
       if (r.ok) {
         const data = await r.json();
-        const part = data?.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data);
+        const parts = data?.candidates?.[0]?.content?.parts || [];
+        attempt.partKeys = parts.map(p => Object.keys(p));
+        const part = parts.find(p => p.inlineData?.data);
         if (part) {
           console.log('[bnr-after-image] success', model);
+          if (diag) diag.push(attempt);
           return {
             mimeType: part.inlineData.mimeType || 'image/png',
             base64: part.inlineData.data,
             modelUsed: model
           };
         }
-        console.warn('[bnr-after-image]', model, 'ok but no image part');
+        attempt.error = 'ok but no image part';
+        console.warn('[bnr-after-image]', model, 'ok but no image part', JSON.stringify(parts).slice(0, 200));
+        if (diag) diag.push(attempt);
         continue;
       }
       const errTxt = await r.text();
+      attempt.error = errTxt.slice(0, 300);
       console.warn('[bnr-after-image]', model, r.status, errTxt.slice(0, 240));
-      // Continue on 404 (model not found), 400 (bad request), 429 (rate limit — try next model)
+      if (diag) diag.push(attempt);
       if (r.status === 404 || r.status === 400 || r.status === 429) continue;
       return null;
     } catch (e) {
+      attempt.error = String(e?.message || e);
       console.warn('[bnr-after-image-fail]', model, e?.message);
+      if (diag) diag.push(attempt);
       continue;
     }
   }
@@ -166,6 +177,10 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  // Optional ?_diag=1 — when present, the response includes a _diag object with per-step internals.
+  const wantDiag = (req.url || '').includes('_diag=1');
+  const diag = wantDiag ? { textAttempts: [], imageAttempts: [] } : null;
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -205,6 +220,7 @@ export default async function handler(req, res) {
   const [beforeImageUrl, analysis] = await Promise.all([
     uploadToBlob('user-uploads', base64, mimeType),
     (async () => {
+      const attempt = { model: GEMINI_TEXT_MODEL, status: null, ok: false, error: null, rawText: null, finishReason: null };
       try {
         const geminiBody = {
           contents: [{
@@ -221,16 +237,26 @@ export default async function handler(req, res) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(geminiBody)
         });
+        attempt.status = r.status;
+        attempt.ok = r.ok;
         if (!r.ok) {
           const errTxt = await r.text();
+          attempt.error = errTxt.slice(0, 400);
           console.error('[bnr-gemini]', r.status, errTxt.slice(0, 500));
+          if (diag) diag.textAttempts.push(attempt);
           return null;
         }
         const data = await r.json();
         const txt = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        attempt.rawText = txt.slice(0, 400);
+        attempt.finishReason = data?.candidates?.[0]?.finishReason || null;
+        attempt.promptFeedback = data?.promptFeedback || null;
+        if (diag) diag.textAttempts.push(attempt);
         return extractJson(txt) || {};
       } catch (e) {
+        attempt.error = String(e?.message || e);
         console.error('[bnr-gemini-fetch-fail]', e?.message);
+        if (diag) diag.textAttempts.push(attempt);
         return null;
       }
     })()
@@ -243,7 +269,7 @@ export default async function handler(req, res) {
   const quote = calcQuote(analysis);
 
   // Generate after-image, then upload to Blob (sequential — image gen result feeds upload).
-  const afterImageData = await generateAfterImage(apiKey, mimeType, base64);
+  const afterImageData = await generateAfterImage(apiKey, mimeType, base64, diag?.imageAttempts);
   let afterImageUrl = null;
   let afterImageInline = null; // fallback if blob upload fails
   if (afterImageData) {
@@ -254,7 +280,7 @@ export default async function handler(req, res) {
     }
   }
 
-  return res.status(200).json({
+  const response = {
     ok: true,
     quote,
     beforeImageUrl,                      // user's uploaded photo (Blob CDN URL) or null
@@ -262,5 +288,7 @@ export default async function handler(req, res) {
     afterImage: afterImageInline,        // inline base64 fallback only if blob upload failed
     lead: { received: true, email },
     requestId: req.headers['x-vercel-id'] || null
-  });
+  };
+  if (diag) response._diag = diag;
+  return res.status(200).json(response);
 }
