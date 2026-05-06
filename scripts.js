@@ -277,10 +277,17 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
       const method = methodMap[q.recommendedMethod] || 'soft wash + pressure';
       const surfaceLabel = q.surfaceLabel || q.surfaceType || 'exterior';
       detail.textContent = 'Estimated ' + q.sqft + ' sq ft \u00b7 ' + (q.stainLevel || 'moderate') + ' stain level \u00b7 ' + method + ' \u00b7 ' + surfaceLabel;
-      // Real AI-generated after-image (falls back to static SVG if generation failed)
-      if (apiData.afterImage) {
-        const afterImg = document.getElementById('aqAfterImg');
-        if (afterImg) afterImg.src = apiData.afterImage;
+      // AI-generated after-image: prefer Vercel Blob CDN URL (smaller payload, cached),
+      // fall back to inline base64 if Blob upload failed, else keep default static SVG.
+      const afterImg = document.getElementById('aqAfterImg');
+      if (afterImg) {
+        if (apiData.afterImageUrl) afterImg.src = apiData.afterImageUrl;
+        else if (apiData.afterImage) afterImg.src = apiData.afterImage;
+      }
+      // Optionally swap the "Now" image to the Blob URL too for consistent CDN delivery
+      if (apiData.beforeImageUrl) {
+        const beforeImgEl = document.getElementById('aqBeforeImg');
+        if (beforeImgEl) beforeImgEl.src = apiData.beforeImageUrl;
       }
     } else {
       const hash = (data.email || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);

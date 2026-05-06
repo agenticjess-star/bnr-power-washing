@@ -1,10 +1,16 @@
-// Vercel Serverless Function: AI-powered instant quote
-// POST /api/quote with { photo: dataUri, email, phone, address, service }
-// Returns { ok, quote: {...}, afterImage: dataUri|null, lead: {...} }
+// Vercel Serverless Function: AI-powered instant quote with Vercel Blob persistence
+// POST /api/quote with { photo: dataUri, email, phone, address, service, type }
+// Returns { ok, quote, beforeImageUrl, afterImageUrl, afterImage (fallback), lead }
 //
-// Two Gemini calls:
-//  1. Vision analysis (text JSON): surface type, sqft, stain, method, summary
-//  2. Image generation: "after" image showing the same property cleaned
+// Pipeline:
+//  1. Receive base64 photo (frontend has already downscaled to ~150-300KB)
+//  2. Upload original photo to Vercel Blob → beforeImageUrl
+//  3. Gemini Vision analysis → quote calculation
+//  4. Gemini Image Gen → generated "after" image (base64)
+//  5. Upload generated image to Vercel Blob → afterImageUrl
+//  6. Return URLs (small payload). Cleanup cron deletes anything >24h old.
+
+import { put } from '@vercel/blob';
 
 export const config = { maxDuration: 30 };
 
@@ -69,8 +75,40 @@ function extractJson(txt) {
   try { return JSON.parse(cleaned.slice(s, e + 1)); } catch (err) { return null; }
 }
 
+function emailHash(email) {
+  // 8-char non-PII hash; salt-free is fine for filename uniqueness only
+  let h = 0;
+  for (let i = 0; i < email.length; i++) h = ((h << 5) - h + email.charCodeAt(i)) | 0;
+  return Math.abs(h).toString(36).padStart(6, '0').slice(0, 8);
+}
+
+async function uploadToBlob(prefix, base64, mimeType) {
+  // prefix: 'user-uploads' | 'after-images'
+  // Returns blob URL or null on failure (best-effort).
+  try {
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      console.warn('[bnr-blob] BLOB_READ_WRITE_TOKEN missing — skipping upload');
+      return null;
+    }
+    const buffer = Buffer.from(base64, 'base64');
+    const ext = (mimeType.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+    const ts = Date.now();
+    const rand = Math.random().toString(36).slice(2, 8);
+    const path = `${prefix}/${ts}-${rand}.${ext}`;
+    const blob = await put(path, buffer, {
+      access: 'public',
+      contentType: mimeType,
+      addRandomSuffix: false
+    });
+    return blob.url;
+  } catch (e) {
+    console.warn('[bnr-blob-fail]', prefix, e?.message);
+    return null;
+  }
+}
+
 async function generateAfterImage(apiKey, mimeType, base64) {
-  // Best-effort: returns data URI or null. Tries primary model, falls back if 404.
+  // Returns { mimeType, base64 } or null.
   const candidateModels = [GEMINI_IMAGE_MODEL, 'gemini-2.5-flash-image', 'gemini-2.0-flash-exp-image-generation'];
   for (const model of candidateModels) {
     try {
@@ -94,14 +132,14 @@ async function generateAfterImage(apiKey, mimeType, base64) {
         const data = await r.json();
         const part = data?.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data);
         if (part) {
-          const outMime = part.inlineData.mimeType || 'image/png';
-          return `data:${outMime};base64,${part.inlineData.data}`;
+          return {
+            mimeType: part.inlineData.mimeType || 'image/png',
+            base64: part.inlineData.data
+          };
         }
-        // 200 but no inlineData — try next model
         console.warn('[bnr-after-image]', model, 'ok but no image part');
         continue;
       }
-      // Non-2xx — try next model on 404, otherwise log and bail
       const errTxt = await r.text();
       console.warn('[bnr-after-image]', model, r.status, errTxt.slice(0, 240));
       if (r.status === 404 || r.status === 400) continue;
@@ -130,7 +168,7 @@ export default async function handler(req, res) {
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch (e) { return res.status(400).json({ error: 'Invalid JSON body' }); }
   }
-  const { photo, email, phone, address, service } = body || {};
+  const { photo, email, phone, address, service, type } = body || {};
 
   if (!photo || typeof photo !== 'string' || !photo.startsWith('data:image/')) {
     return res.status(400).json({ error: 'photo must be a base64 data URI (data:image/...)' });
@@ -146,54 +184,74 @@ export default async function handler(req, res) {
 
   const lead = {
     ts: new Date().toISOString(),
-    email, phone: phone || null, address: address || null, service: service || null,
+    email,
+    phone: phone || null,
+    address: address || null,
+    service: service || null,
+    type: type || 'residential',
     sessionId: req.headers['x-vercel-id'] || null
   };
   try { console.log('[bnr-lead]', JSON.stringify(lead)); } catch (e) {}
 
-  // Step 1: Analyze the photo (text JSON response)
-  let analysis;
-  try {
-    const geminiBody = {
-      contents: [{
-        role: 'user',
-        parts: [
-          { text: ANALYSIS_PROMPT },
-          { inlineData: { mimeType, data: base64 } }
-        ]
-      }],
-      generationConfig: { temperature: 0.2, maxOutputTokens: 400, responseMimeType: 'application/json' }
-    };
-    const r = await fetch(`${GEMINI_BASE}/${GEMINI_TEXT_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(geminiBody)
-    });
-    if (!r.ok) {
-      const errTxt = await r.text();
-      console.error('[bnr-gemini]', r.status, errTxt.slice(0, 500));
-      return res.status(502).json({ error: 'AI analysis temporarily unavailable', code: r.status });
-    }
-    const data = await r.json();
-    const txt = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    analysis = extractJson(txt) || {};
-  } catch (e) {
-    console.error('[bnr-gemini-fetch-fail]', e?.message);
-    return res.status(502).json({ error: 'AI analysis failed', detail: String(e?.message || e) });
+  // Run before-image upload + analysis in parallel (independent).
+  const [beforeImageUrl, analysis] = await Promise.all([
+    uploadToBlob('user-uploads', base64, mimeType),
+    (async () => {
+      try {
+        const geminiBody = {
+          contents: [{
+            role: 'user',
+            parts: [
+              { text: ANALYSIS_PROMPT },
+              { inlineData: { mimeType, data: base64 } }
+            ]
+          }],
+          generationConfig: { temperature: 0.2, maxOutputTokens: 400, responseMimeType: 'application/json' }
+        };
+        const r = await fetch(`${GEMINI_BASE}/${GEMINI_TEXT_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(geminiBody)
+        });
+        if (!r.ok) {
+          const errTxt = await r.text();
+          console.error('[bnr-gemini]', r.status, errTxt.slice(0, 500));
+          return null;
+        }
+        const data = await r.json();
+        const txt = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        return extractJson(txt) || {};
+      } catch (e) {
+        console.error('[bnr-gemini-fetch-fail]', e?.message);
+        return null;
+      }
+    })()
+  ]);
+
+  if (!analysis) {
+    return res.status(502).json({ error: 'AI analysis temporarily unavailable' });
   }
 
   const quote = calcQuote(analysis);
 
-  // Step 2: Generate an "after" image (best-effort, parallel-safe).
-  // We await so the response carries the image; the function timeout (30s)
-  // is enough for both calls. If image gen fails, afterImage is null and the
-  // frontend falls back to its default SVG placeholder gracefully.
-  const afterImage = await generateAfterImage(apiKey, mimeType, base64);
+  // Generate after-image, then upload to Blob (sequential — image gen result feeds upload).
+  const afterImageData = await generateAfterImage(apiKey, mimeType, base64);
+  let afterImageUrl = null;
+  let afterImageInline = null; // fallback if blob upload fails
+  if (afterImageData) {
+    afterImageUrl = await uploadToBlob('after-images', afterImageData.base64, afterImageData.mimeType);
+    if (!afterImageUrl) {
+      // Blob upload failed — return inline data URI as fallback so frontend still renders something
+      afterImageInline = `data:${afterImageData.mimeType};base64,${afterImageData.base64}`;
+    }
+  }
 
   return res.status(200).json({
     ok: true,
     quote,
-    afterImage,
+    beforeImageUrl,                      // user's uploaded photo (Blob CDN URL) or null
+    afterImageUrl,                       // AI-generated cleaned version (Blob CDN URL) or null
+    afterImage: afterImageInline,        // inline base64 fallback only if blob upload failed
     lead: { received: true, email },
     requestId: req.headers['x-vercel-id'] || null
   });
