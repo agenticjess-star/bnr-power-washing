@@ -1,11 +1,11 @@
-// Vercel Serverless Function: Dynamic gallery from Cloudinary tag
-// GET /api/gallery — returns image list for the gallery page.
+// Vercel Serverless Function: Gallery — merges static-fallback hardcoded items with
+// Cloudinary live items so the gallery is ALWAYS populated even if Cloudinary auth fails.
+// GET /api/gallery
 //
-// Strategy:
-//  1) If CLOUDINARY_API_KEY + CLOUDINARY_API_SECRET are set in Vercel env,
-//     query Cloudinary's authenticated Resources API by tag.
-//  2) Otherwise (or if Cloudinary call fails), fall back to the static
-//     gallery-images.json shipped with the deploy.
+// Returns: { ok, source: 'merged'|'static-only'|'cloudinary-only', cloudName, count, items: [...] }
+//
+// Item shape: { id, v, ext, ar, category, loc, tag, size }
+// Frontend builds Cloudinary URLs from these fields with f_auto for HEIC→browser conversion.
 
 export const config = { maxDuration: 10 };
 
@@ -65,37 +65,57 @@ async function fetchFromCloudinary() {
   });
 }
 
-export default async function handler(req, res) {
-  res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  try {
-    const dynamicItems = await fetchFromCloudinary();
-    if (dynamicItems && dynamicItems.length > 0) {
-      return res.status(200).json({
-        ok: true,
-        source: 'cloudinary-live',
-        cloudName: CLOUD_NAME,
-        count: dynamicItems.length,
-        items: dynamicItems
-      });
-    }
-  } catch (e) {
-    console.warn('[bnr-gallery] Live fetch error:', e?.message);
-  }
+async function readStaticFallback() {
   try {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
     const file = path.join(process.cwd(), 'gallery-images.json');
     const raw = await fs.readFile(file, 'utf8');
     const json = JSON.parse(raw);
-    return res.status(200).json({
-      ok: true,
-      source: 'static-fallback',
-      cloudName: json.cloudName || CLOUD_NAME,
-      count: json.items?.length || 0,
-      items: json.items || []
-    });
+    return json.items || [];
   } catch (e) {
-    return res.status(500).json({ ok: false, error: 'No gallery source available', detail: e?.message });
+    console.warn('[bnr-gallery] static fallback read failed', e?.message);
+    return [];
   }
+}
+
+export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  // Run both sources in parallel — never block on Cloudinary alone.
+  const [cloudinaryItems, staticItems] = await Promise.all([
+    fetchFromCloudinary().catch(e => { console.warn('[bnr-gallery] cloudinary error', e?.message); return null; }),
+    readStaticFallback()
+  ]);
+
+  // Merge: static (hardcoded) items FIRST so they always show, then cloudinary live, dedupe by id.
+  const seen = new Set();
+  const merged = [];
+  for (const item of [...staticItems, ...(cloudinaryItems || [])]) {
+    if (item && item.id && !seen.has(item.id)) {
+      seen.add(item.id);
+      merged.push(item);
+    }
+  }
+
+  let source = 'static-only';
+  if (cloudinaryItems && cloudinaryItems.length > 0 && staticItems.length > 0) source = 'merged';
+  else if (cloudinaryItems && cloudinaryItems.length > 0) source = 'cloudinary-only';
+
+  if (merged.length === 0) {
+    return res.status(500).json({
+      ok: false,
+      error: 'No gallery source available',
+      detail: `cloudinary=${cloudinaryItems?.length ?? 'null'} static=${staticItems.length}`
+    });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    source,
+    cloudName: CLOUD_NAME,
+    count: merged.length,
+    items: merged
+  });
 }

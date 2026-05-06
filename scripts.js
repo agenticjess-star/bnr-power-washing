@@ -277,14 +277,26 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
       const method = methodMap[q.recommendedMethod] || 'soft wash + pressure';
       const surfaceLabel = q.surfaceLabel || q.surfaceType || 'exterior';
       detail.textContent = 'Estimated ' + q.sqft + ' sq ft \u00b7 ' + (q.stainLevel || 'moderate') + ' stain level \u00b7 ' + method + ' \u00b7 ' + surfaceLabel;
-      // AI-generated after-image: prefer Vercel Blob CDN URL (smaller payload, cached),
-      // fall back to inline base64 if Blob upload failed, else keep default static SVG.
+      // After-image priority chain:
+      //   1. apiData.afterImageUrl (real AI-generated image, persisted to Vercel Blob CDN)
+      //   2. apiData.afterImage    (inline base64 fallback if Blob upload failed)
+      //   3. user's own photo + CSS filter (when AI image gen is rate-limited / unavailable)
       const afterImg = document.getElementById('aqAfterImg');
       if (afterImg) {
-        if (apiData.afterImageUrl) afterImg.src = apiData.afterImageUrl;
-        else if (apiData.afterImage) afterImg.src = apiData.afterImage;
+        if (apiData.afterImageUrl) {
+          afterImg.src = apiData.afterImageUrl;
+          afterImg.style.filter = '';
+        } else if (apiData.afterImage) {
+          afterImg.src = apiData.afterImage;
+          afterImg.style.filter = '';
+        } else if (currentPhotoData) {
+          // Graceful fallback \u2014 show the user's own photo with a "freshly cleaned" filter.
+          // Brightness, contrast, and saturation lift; subtle blur smooths grime/staining.
+          afterImg.src = currentPhotoData;
+          afterImg.style.filter = 'brightness(1.16) contrast(1.12) saturate(1.20) blur(0.4px)';
+        }
       }
-      // Optionally swap the "Now" image to the Blob URL too for consistent CDN delivery
+      // Swap the "Now" image to the Blob URL too for consistent CDN delivery
       if (apiData.beforeImageUrl) {
         const beforeImgEl = document.getElementById('aqBeforeImg');
         if (beforeImgEl) beforeImgEl.src = apiData.beforeImageUrl;
@@ -309,6 +321,13 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
       }
       priceLow.textContent = '$' + base;
       priceHigh.textContent = '$' + high;
+      // Even in the offline-estimate branch, show a "cleaned" version of the user's photo
+      // as the after-image so the result page still renders something useful.
+      const afterImgOffline = document.getElementById('aqAfterImg');
+      if (afterImgOffline && currentPhotoData) {
+        afterImgOffline.src = currentPhotoData;
+        afterImgOffline.style.filter = 'brightness(1.16) contrast(1.12) saturate(1.20) blur(0.4px)';
+      }
     }
     goToStep(4);
     startTimer();
