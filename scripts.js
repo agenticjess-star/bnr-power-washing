@@ -115,14 +115,44 @@ document.querySelectorAll('[data-count],[data-count-seq]').forEach(el => counter
     tool.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  // Downscale a data URI image to fit Vercel's 4.5MB function payload limit.
+  // Returns Promise<dataUri> (downscaled JPEG) or original on failure.
+  function downscaleDataUri(dataUri, maxDim, quality) {
+    return new Promise((resolve) => {
+      try {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const w0 = img.naturalWidth, h0 = img.naturalHeight;
+            const ratio = Math.min(1, maxDim / Math.max(w0, h0));
+            const w = Math.max(1, Math.round(w0 * ratio));
+            const h = Math.max(1, Math.round(h0 * ratio));
+            const c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            resolve(c.toDataURL('image/jpeg', quality));
+          } catch (e) { resolve(dataUri); }
+        };
+        img.onerror = () => resolve(dataUri);
+        img.src = dataUri;
+      } catch (e) { resolve(dataUri); }
+    });
+  }
+
   function handleFile(file) {
     if (!file || !file.type.startsWith('image/')) return;
     const reader = new FileReader();
     reader.onload = (e) => {
-      currentPhotoData = e.target.result;
-      previewImg.src = currentPhotoData;
-      beforeImg.src = currentPhotoData;
-      goToStep(2);
+      const orig = e.target.result;
+      // Show full-quality preview and "Now" image to the user...
+      previewImg.src = orig;
+      beforeImg.src = orig;
+      // ...but downscale before POSTing to the AI quote API (Vercel function 4.5MB cap).
+      downscaleDataUri(orig, 1600, 0.82).then((scaled) => {
+        currentPhotoData = scaled || orig;
+        goToStep(2);
+      });
     };
     reader.readAsDataURL(file);
   }
