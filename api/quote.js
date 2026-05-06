@@ -38,16 +38,9 @@ const PRICING = {
   unknown:     { perSqft: 0.45, min: 250, label: 'General exterior cleaning' }
 };
 
-const ANALYSIS_PROMPT = `You are estimating a power-washing job from a customer's photo. Analyze the image and respond with ONLY a single JSON object (no markdown fences, no prose). Schema:
-{
-  "surfaceType": one of: "driveway"|"sidewalk"|"house_siding"|"roof"|"gutter"|"window"|"deck_wood"|"patio_stone"|"fence"|"commercial"|"unknown",
-  "estimatedSqft": integer (your best estimate of cleanable square footage visible in the photo),
-  "stainLevel": one of: "light"|"moderate"|"heavy",
-  "recommendedMethod": one of: "soft_wash"|"pressure_wash"|"both",
-  "summary": short single-sentence description of what is in the photo and what cleaning is needed,
-  "confidence": one of: "low"|"medium"|"high"
-}
-Be conservative on sqft. Output ONLY the JSON.`;
+const ANALYSIS_PROMPT = `Estimate a power-washing job from this photo. Output ONLY a JSON object, no fences, no prose. Keep "summary" under 15 words. Schema:
+{"surfaceType":"driveway"|"sidewalk"|"house_siding"|"roof"|"gutter"|"window"|"deck_wood"|"patio_stone"|"fence"|"commercial"|"unknown","estimatedSqft":<int>,"stainLevel":"light"|"moderate"|"heavy","recommendedMethod":"soft_wash"|"pressure_wash"|"both","summary":"<=15 words","confidence":"low"|"medium"|"high"}
+Be conservative on sqft.`;
 
 const AFTER_IMAGE_PROMPT = `Show this exact property after a professional power washing service: same composition, same camera angle, same vantage point, same architectural details, same surroundings. The only change: every cleanable surface is now sparkling clean and pristine — spotless concrete, vibrant clean siding, no algae, no mildew, no rust, no oil stains, fresh and bright. Photorealistic, natural daylight, professional real-estate photography quality. No text, no logos, no watermarks added. Preserve the original property exactly; only remove the dirt and stains.`;
 
@@ -230,7 +223,7 @@ export default async function handler(req, res) {
               { inlineData: { mimeType, data: base64 } }
             ]
           }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 400, responseMimeType: 'application/json' }
+          generationConfig: { temperature: 0.2, maxOutputTokens: 1500, responseMimeType: 'application/json' }
         };
         const r = await fetch(`${GEMINI_BASE}/${GEMINI_TEXT_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`, {
           method: 'POST',
