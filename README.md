@@ -8,7 +8,7 @@
 
 > *"Skip the call. Get an instant quote."*
 >
-> A complete digital transformation for a family-owned Houston power washing business — built end-to-end in a single agentic session, with an industry-first AI-powered instant-quote tool as the conversion moat.
+> A complete digital transformation for a family-owned Houston power washing business, with an industry-first AI-powered instant-quote tool as the conversion moat.
 
 </div>
 
